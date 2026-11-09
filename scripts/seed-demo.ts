@@ -701,8 +701,13 @@ async function main() {
           const name = pick(FIRST_NAMES);
           const company = pick(COMPANIES);
           const email = `${name}@${company}.example.com`;
-          // Conversions lag the click by 0-6 days, never into the future.
-          const lag = Math.min(daysAgo, Math.floor(between(0, 7)));
+
+          // Conversions lag the click by 0-6 days. A lag that would land in
+          // the future means this click simply has not converted yet — skip
+          // it. Clamping instead piles every recent click onto today and puts
+          // a false spike at the right edge of every chart.
+          const lag = Math.floor(between(0, 7));
+          if (lag > daysAgo) continue;
           const convertedAt = timeWithinDay(daysAgo - lag);
 
           const eventType: ConversionType = random() < 0.78 ? "TRIAL" : "DEMO";

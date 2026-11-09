@@ -438,6 +438,13 @@ model Attribution {
   conversion Conversion @relation(fields: [conversionId], references: [id], onDelete: Cascade)
   touch      Touch      @relation(fields: [touchId], references: [id], onDelete: Cascade)
 
+  /// Relations onto the denormalised ids, so reports can join without a second
+  /// round trip. SetNull rather than Cascade: deleting an ad must not erase
+  /// the record that revenue was once credited to it.
+  ad         Ad?        @relation(fields: [adId], references: [id], onDelete: SetNull)
+  adSet      AdSet?     @relation(fields: [adSetId], references: [id], onDelete: SetNull)
+  campaign   Campaign?  @relation(fields: [campaignId], references: [id], onDelete: SetNull)
+
   @@unique([conversionId, touchId, model])
   @@index([workspaceId, model, occurredAt])
   @@index([workspaceId, model, adId])
@@ -488,6 +495,7 @@ model Campaign {
   ads          Ad[]
   touches      Touch[]
   spendDaily   SpendDaily[]
+  attributions Attribution[]
 
   @@unique([adAccountId, externalId])
   @@index([workspaceId])
@@ -505,9 +513,10 @@ model AdSet {
 
   workspace  Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   campaign   Campaign     @relation(fields: [campaignId], references: [id], onDelete: Cascade)
-  ads        Ad[]
-  touches    Touch[]
-  spendDaily SpendDaily[]
+  ads          Ad[]
+  touches      Touch[]
+  spendDaily   SpendDaily[]
+  attributions Attribution[]
 
   @@unique([campaignId, externalId])
   @@index([workspaceId])
@@ -544,8 +553,9 @@ model Ad {
   adSet      AdSet        @relation(fields: [adSetId], references: [id], onDelete: Cascade)
   campaign   Campaign     @relation(fields: [campaignId], references: [id], onDelete: Cascade)
   angle      Angle?       @relation(fields: [angleId], references: [id], onDelete: SetNull)
-  touches    Touch[]
-  spendDaily SpendDaily[]
+  touches      Touch[]
+  spendDaily   SpendDaily[]
+  attributions Attribution[]
 
   @@unique([adSetId, externalId])
   @@index([workspaceId])

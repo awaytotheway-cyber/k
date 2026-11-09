@@ -60,12 +60,20 @@
   --l-warning-subtle: oklch(96% 0.05 85);
   --l-danger: oklch(56% 0.19 22);
   --l-danger-subtle: oklch(95% 0.03 22);
-  --l-chart-1: oklch(53% 0.192 268);
-  --l-chart-2: oklch(62% 0.15 195);
-  --l-chart-3: oklch(56% 0.14 160);
-  --l-chart-4: oklch(68% 0.14 75);
-  --l-chart-5: oklch(56% 0.19 22);
-  --l-chart-6: oklch(55% 0.17 310);
+  /* Categorical chart ramp. These values are not a matter of taste: they are
+     the output of the data-viz validator, which checks the OKLCH lightness
+     band, a chroma floor, colour-blind separation between adjacent slots, a
+     normal-vision floor, and contrast against the chart surface.
+     Slots alternate dark/light and run blue, amber, purple, teal, red, green —
+     red and green are kept apart and differ in lightness, which is what keeps
+     them distinguishable under deuteranopia. Assign in order; never cycle.
+     Re-run scripts/validate_palette.js before changing any of these. */
+  --l-chart-1: oklch(46% 0.185 264);
+  --l-chart-2: oklch(60% 0.145 62);
+  --l-chart-3: oklch(46% 0.185 300);
+  --l-chart-4: oklch(60% 0.115 196);
+  --l-chart-5: oklch(46% 0.185 25);
+  --l-chart-6: oklch(60% 0.185 145);
 
   /* dark */
   --d-bg: oklch(17% 0.012 258);
@@ -87,12 +95,14 @@
   --d-warning-subtle: oklch(29% 0.06 80);
   --d-danger: oklch(67% 0.18 20);
   --d-danger-subtle: oklch(29% 0.08 20);
-  --d-chart-1: oklch(68% 0.17 268);
-  --d-chart-2: oklch(72% 0.14 195);
-  --d-chart-3: oklch(72% 0.15 160);
-  --d-chart-4: oklch(79% 0.14 80);
-  --d-chart-5: oklch(67% 0.18 20);
-  --d-chart-6: oklch(70% 0.16 310);
+  /* Dark steps are selected and validated against the dark surface, not an
+     automatic lightening of the light ramp. */
+  --d-chart-1: oklch(55% 0.17 264);
+  --d-chart-2: oklch(66% 0.145 62);
+  --d-chart-3: oklch(55% 0.17 300);
+  --d-chart-4: oklch(66% 0.115 196);
+  --d-chart-5: oklch(55% 0.17 25);
+  --d-chart-6: oklch(66% 0.17 145);
 
   /* default mapping: light */
   --bg: var(--l-bg);
