@@ -1,0 +1,781 @@
+// TrueROAS — marketing attribution + AI analytics for B2B SaaS advertisers.
+// Spec: docs/specs/2026-11-09-trueroas-design.md
+//
+// Shape of the data, end to end:
+//   Touch (ad click) -> Visitor -> Conversion (money) -> Attribution (credit per model)
+//   SpendDaily (cost) joins in at Ad / AdSet / Campaign to produce CAC and ROAS.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ---------------------------------------------------------------------------
+// Enums
+// ---------------------------------------------------------------------------
+
+enum Role {
+  OWNER
+  ADMIN
+  MEMBER
+  VIEWER
+}
+
+enum Plan {
+  TRIAL
+  STARTER
+  GROWTH
+  AGENCY
+}
+
+enum PlanStatus {
+  TRIALING
+  ACTIVE
+  PAST_DUE
+  CANCELED
+  INCOMPLETE
+}
+
+enum Platform {
+  META
+  GOOGLE
+  TIKTOK
+  LINKEDIN
+  MICROSOFT
+  ORGANIC
+  DIRECT
+  REFERRAL
+  EMAIL
+  OTHER
+}
+
+/// Click identifiers we read off the landing URL. These arrive for free on every
+/// ad click, which is why attribution works before any platform API is connected.
+enum ClickIdType {
+  FBCLID
+  GCLID
+  GBRAID
+  WBRAID
+  TTCLID
+  LI_FAT_ID
+  MSCLKID
+  NONE
+}
+
+enum DeviceType {
+  DESKTOP
+  MOBILE
+  TABLET
+  UNKNOWN
+}
+
+enum ConversionType {
+  SIGNUP
+  TRIAL
+  DEMO
+  QUALIFIED
+  PURCHASE
+  SUBSCRIPTION
+  EXPANSION
+  CHURN
+  CUSTOM
+}
+
+enum ConversionSource {
+  PIXEL
+  API
+  STRIPE
+  CSV
+  MANUAL
+}
+
+enum AttributionModel {
+  LAST_CLICK
+  FIRST_CLICK
+  LINEAR
+  TIME_DECAY
+  POSITION_BASED
+}
+
+enum AdAccountSource {
+  SEED
+  CSV
+  API
+}
+
+enum ConnectionStatus {
+  PENDING
+  CONNECTED
+  DISCONNECTED
+  ERROR
+}
+
+/// Which level of the ad hierarchy a spend row describes.
+enum SpendLevel {
+  AD
+  ADSET
+  CAMPAIGN
+}
+
+enum InsightKind {
+  SCALE
+  CUT
+  WATCH
+  ANOMALY
+  ANGLE_SUGGESTION
+  HEALTH
+}
+
+enum InsightStatus {
+  NEW
+  ACKED
+  DISMISSED
+  ACTIONED
+}
+
+enum HealthStatus {
+  HEALTHY
+  WARNING
+  CRITICAL
+  UNKNOWN
+}
+
+enum ChatRole {
+  USER
+  ASSISTANT
+}
+
+// ---------------------------------------------------------------------------
+// Identity and tenancy
+// ---------------------------------------------------------------------------
+
+model User {
+  id            String       @id @default(cuid())
+  email         String       @unique
+  passwordHash  String?
+  name          String?
+  emailVerified DateTime?
+  image         String?
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+  memberships   Membership[]
+  accounts      Account[]
+  sessions      Session[]
+  chatThreads   ChatThread[]
+
+  @@index([email])
+}
+
+/// Auth.js OAuth account link. Unused with credentials sign-in, present so that
+/// adding Google/Microsoft sign-in later is a config change, not a migration.
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state     String?
+  user              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@index([userId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+/// The billing entity. One org holds one subscription and one or more workspaces
+/// (1 workspace = a solo SaaS; many = an agency managing clients).
+model Organization {
+  id                   String       @id @default(cuid())
+  name                 String
+  plan                 Plan         @default(TRIAL)
+  planStatus           PlanStatus   @default(TRIALING)
+  trialEndsAt          DateTime?
+  stripeCustomerId     String?      @unique
+  stripeSubscriptionId String?      @unique
+  stripePriceId        String?
+  currentPeriodEnd     DateTime?
+  /// Opt-in to contributing anonymized metrics to category benchmarks.
+  /// Off by default; aggregation also enforces a minimum contributing-account floor.
+  benchmarkOptIn       Boolean      @default(false)
+  createdAt            DateTime     @default(now())
+  updatedAt            DateTime     @updatedAt
+  memberships          Membership[]
+  workspaces           Workspace[]
+  auditLogs            AuditLog[]
+
+  @@index([stripeCustomerId])
+}
+
+model Membership {
+  id        String       @id @default(cuid())
+  userId    String
+  orgId     String
+  role      Role         @default(OWNER)
+  createdAt DateTime     @default(now())
+  user      User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  org       Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, orgId])
+  @@index([orgId])
+}
+
+/// A tracked property: one website / product / client account.
+/// Every tracking and reporting row hangs off a workspace.
+model Workspace {
+  id             String   @id @default(cuid())
+  orgId          String
+  name           String
+  slug           String   @unique
+  /// Industry category, used to pick the right benchmark cohort.
+  category       String?
+  timezone       String   @default("UTC")
+  currency       String   @default("USD")
+  /// Target cost per acquisition in cents. Drives the confidence-layer verdicts.
+  targetCacCents Int?
+  /// Public identifier embedded in the tracking snippet. Safe to expose.
+  pixelKey       String   @unique @default(cuid())
+  /// Attribution lookback window in days.
+  lookbackDays   Int      @default(90)
+  /// Shared secret for this workspace's inbound Stripe conversion webhook.
+  stripeWebhookSecret String?
+  isDemo         Boolean  @default(false)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  org             Organization     @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  apiKeys         ApiKey[]
+  visitors        Visitor[]
+  touches         Touch[]
+  conversions     Conversion[]
+  attributions    Attribution[]
+  adAccounts      AdAccount[]
+  campaigns       Campaign[]
+  adSets          AdSet[]
+  ads             Ad[]
+  spendDaily      SpendDaily[]
+  insights        Insight[]
+  chatThreads     ChatThread[]
+  healthSnapshots HealthSnapshot[]
+  savedViews      SavedView[]
+  shareLinks      ShareLink[]
+  importBatches   ImportBatch[]
+
+  @@index([orgId])
+}
+
+/// Bearer key for the server-side conversion ingest API. Only the hash is stored.
+model ApiKey {
+  id          String    @id @default(cuid())
+  workspaceId String
+  label       String
+  /// SHA-256 of the full key. The plaintext is shown once, at creation.
+  hashedKey   String    @unique
+  /// First characters of the key, for display: "tr_live_a1b2…".
+  prefix      String
+  lastUsedAt  DateTime?
+  revokedAt   DateTime?
+  createdAt   DateTime  @default(now())
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId])
+}
+
+// ---------------------------------------------------------------------------
+// Tracking
+// ---------------------------------------------------------------------------
+
+/// A person, identified by a first-party cookie until they hand us an email.
+model Visitor {
+  id              String   @id @default(cuid())
+  workspaceId     String
+  /// Value of the first-party cookie set by t.js.
+  anonId          String
+  identifiedEmail String?
+  /// The customer's own user/account id, if they pass one.
+  externalId      String?
+  firstSeenAt     DateTime @default(now())
+  lastSeenAt      DateTime @default(now())
+
+  workspace   Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  touches     Touch[]
+  conversions Conversion[]
+
+  @@unique([workspaceId, anonId])
+  @@index([workspaceId, identifiedEmail])
+  @@index([workspaceId, externalId])
+}
+
+/// One visit that may carry ad provenance. The raw material of attribution.
+model Touch {
+  id          String      @id @default(cuid())
+  workspaceId String
+  visitorId   String
+  occurredAt  DateTime    @default(now())
+  landingUrl  String
+  referrer    String?
+  utmSource   String?
+  utmMedium   String?
+  utmCampaign String?
+  utmContent  String?
+  utmTerm     String?
+  clickId     String?
+  clickIdType ClickIdType @default(NONE)
+  platform    Platform    @default(DIRECT)
+
+  /// Platform-side ids when the URL carries them (Meta/Google dynamic params).
+  externalAdId       String?
+  externalAdSetId    String?
+  externalCampaignId String?
+
+  /// Resolved once ad metadata is synced or imported.
+  adId       String?
+  adSetId    String?
+  campaignId String?
+
+  deviceType DeviceType @default(UNKNOWN)
+  country    String?
+  /// Salted SHA-256 of the IP. The raw address is never stored.
+  ipHash     String?
+  uaHash     String?
+  sessionId  String?
+
+  workspace    Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  visitor      Visitor       @relation(fields: [visitorId], references: [id], onDelete: Cascade)
+  ad           Ad?           @relation(fields: [adId], references: [id], onDelete: SetNull)
+  adSet        AdSet?        @relation(fields: [adSetId], references: [id], onDelete: SetNull)
+  campaign     Campaign?     @relation(fields: [campaignId], references: [id], onDelete: SetNull)
+  attributions Attribution[]
+
+  @@index([workspaceId, occurredAt])
+  @@index([visitorId, occurredAt])
+  @@index([workspaceId, clickId])
+  @@index([workspaceId, platform, occurredAt])
+  @@index([adId])
+}
+
+/// Something worth money happened: a signup, a demo, a paid subscription.
+model Conversion {
+  id          String           @id @default(cuid())
+  workspaceId String
+  visitorId   String?
+  eventName   String
+  eventType   ConversionType   @default(CUSTOM)
+  occurredAt  DateTime         @default(now())
+  valueCents  Int              @default(0)
+  /// Monthly recurring revenue for subscription events. The number SaaS cares about.
+  mrrCents    Int?
+  currency    String           @default("USD")
+  email       String?
+  externalId  String?
+  source      ConversionSource @default(API)
+  /// Deterministic idempotency key. Replays collapse onto one row.
+  dedupeKey   String           @unique
+  rawPayload  Json?
+  createdAt   DateTime         @default(now())
+
+  workspace    Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  visitor      Visitor?      @relation(fields: [visitorId], references: [id], onDelete: SetNull)
+  attributions Attribution[]
+
+  @@index([workspaceId, occurredAt])
+  @@index([workspaceId, eventType, occurredAt])
+  @@index([visitorId])
+  @@index([workspaceId, email])
+}
+
+/// Credit assigned from one conversion to one touch under one model.
+/// Precomputed for all models so every dashboard query is a flat aggregate.
+///
+/// creditedValueCents across a (conversion, model) group sums EXACTLY to the
+/// conversion value: the engine allocates remainder cents by largest remainder.
+model Attribution {
+  id             String           @id @default(cuid())
+  workspaceId    String
+  conversionId   String
+  touchId        String
+  model          AttributionModel
+  creditFraction Decimal          @db.Decimal(12, 11)
+  creditedValueCents Int          @default(0)
+  creditedMrrCents   Int?
+
+  /// Denormalized from the conversion and touch so reporting never joins.
+  occurredAt DateTime
+  platform   Platform
+  adId       String?
+  adSetId    String?
+  campaignId String?
+
+  createdAt DateTime @default(now())
+
+  workspace  Workspace  @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  conversion Conversion @relation(fields: [conversionId], references: [id], onDelete: Cascade)
+  touch      Touch      @relation(fields: [touchId], references: [id], onDelete: Cascade)
+
+  @@unique([conversionId, touchId, model])
+  @@index([workspaceId, model, occurredAt])
+  @@index([workspaceId, model, adId])
+  @@index([workspaceId, model, campaignId])
+}
+
+// ---------------------------------------------------------------------------
+// Ad data (spend side)
+// ---------------------------------------------------------------------------
+
+model AdAccount {
+  id                String           @id @default(cuid())
+  workspaceId       String
+  platform          Platform
+  externalAccountId String
+  name              String
+  source            AdAccountSource  @default(CSV)
+  connectionStatus  ConnectionStatus @default(PENDING)
+  /// Opaque reference to encrypted credentials held outside this table.
+  credentialsRef    String?
+  lastSyncedAt      DateTime?
+  lastSyncError     String?
+  currency          String           @default("USD")
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+
+  workspace Workspace  @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  campaigns Campaign[]
+
+  @@unique([workspaceId, platform, externalAccountId])
+  @@index([workspaceId])
+}
+
+model Campaign {
+  id          String   @id @default(cuid())
+  workspaceId String
+  adAccountId String
+  externalId  String
+  name        String
+  objective   String?
+  status      String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  workspace    Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  adAccount    AdAccount     @relation(fields: [adAccountId], references: [id], onDelete: Cascade)
+  adSets       AdSet[]
+  ads          Ad[]
+  touches      Touch[]
+  spendDaily   SpendDaily[]
+
+  @@unique([adAccountId, externalId])
+  @@index([workspaceId])
+}
+
+model AdSet {
+  id          String   @id @default(cuid())
+  workspaceId String
+  campaignId  String
+  externalId  String
+  name        String
+  status      String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  workspace  Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  campaign   Campaign     @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  ads        Ad[]
+  touches    Touch[]
+  spendDaily SpendDaily[]
+
+  @@unique([campaignId, externalId])
+  @@index([workspaceId])
+}
+
+model Ad {
+  id          String  @id @default(cuid())
+  workspaceId String
+  adSetId     String
+  campaignId  String
+  externalId  String
+  name        String
+  status      String?
+
+  /// Creative content, used for AI angle extraction.
+  headline        String?
+  primaryText     String?
+  creativeThumbUrl String?
+  landingPageUrl  String?
+
+  /// Angle classification. Confidence is 0..1 from the tagging pass.
+  angleId         String?
+  angleConfidence Decimal? @db.Decimal(4, 3)
+  /// The specific hook the model extracted, e.g. "cut your CAC in half".
+  angleHook       String?
+  angleTaggedAt   DateTime?
+  /// Hash of the creative text the tagging ran on, so re-runs are free.
+  angleSourceHash String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  workspace  Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  adSet      AdSet        @relation(fields: [adSetId], references: [id], onDelete: Cascade)
+  campaign   Campaign     @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  angle      Angle?       @relation(fields: [angleId], references: [id], onDelete: SetNull)
+  touches    Touch[]
+  spendDaily SpendDaily[]
+
+  @@unique([adSetId, externalId])
+  @@index([workspaceId])
+  @@index([workspaceId, angleId])
+}
+
+/// Daily cost, at whatever level of the hierarchy the source provides.
+///
+/// entityKey is a deterministic composite ("ad:<id>", "campaign:<id>") giving a
+/// single non-null unique target, so repeated CSV imports upsert cleanly instead
+/// of duplicating. Postgres treats NULLs in unique keys as distinct, which is
+/// why we don't make (adId, adSetId, campaignId, date) the constraint.
+model SpendDaily {
+  id          String     @id @default(cuid())
+  workspaceId String
+  level       SpendLevel
+  entityKey   String
+  date        DateTime   @db.Date
+  platform    Platform
+
+  adId       String?
+  adSetId    String?
+  campaignId String?
+
+  spendCents  Int @default(0)
+  impressions Int @default(0)
+  clicks      Int @default(0)
+  /// What the ad platform itself claims it converted. The gap between this and
+  /// our tracked count is the discrepancy signal on the Tracking Health page.
+  platformConversions Int?
+  platformValueCents  Int?
+
+  currency  String   @default("USD")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  ad        Ad?       @relation(fields: [adId], references: [id], onDelete: Cascade)
+  adSet     AdSet?    @relation(fields: [adSetId], references: [id], onDelete: Cascade)
+  campaign  Campaign? @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, entityKey, date])
+  @@index([workspaceId, date])
+  @@index([adId, date])
+  @@index([campaignId, date])
+}
+
+/// Record of a CSV/Sheets import, so a bad import can be explained or undone.
+model ImportBatch {
+  id            String   @id @default(cuid())
+  workspaceId   String
+  filename      String
+  rowCount      Int      @default(0)
+  importedCount Int      @default(0)
+  skippedCount  Int      @default(0)
+  errors        Json?
+  mapping       Json?
+  createdAt     DateTime @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, createdAt])
+}
+
+// ---------------------------------------------------------------------------
+// Intelligence
+// ---------------------------------------------------------------------------
+
+/// Global taxonomy of creative angles. Shared across all workspaces so that
+/// benchmarks are comparable.
+model Angle {
+  id          String      @id @default(cuid())
+  slug        String      @unique
+  name        String
+  description String
+  ads         Ad[]
+  benchmarks  Benchmark[]
+}
+
+/// Anonymized cross-customer aggregate: the moat. Written only from workspaces
+/// whose org opted in, and only where sampleSize clears the minimum floor.
+model Benchmark {
+  id          String   @id @default(cuid())
+  category    String
+  angleId     String
+  metric      String
+  medianValue Decimal  @db.Decimal(16, 4)
+  p25Value    Decimal? @db.Decimal(16, 4)
+  p75Value    Decimal? @db.Decimal(16, 4)
+  /// Number of distinct contributing accounts. Cells below the floor are not shown.
+  sampleSize  Int
+  periodStart DateTime @db.Date
+  periodEnd   DateTime @db.Date
+  computedAt  DateTime @default(now())
+
+  angle Angle @relation(fields: [angleId], references: [id], onDelete: Cascade)
+
+  @@unique([category, angleId, metric, periodStart, periodEnd])
+  @@index([category, metric])
+}
+
+/// One AI or rule-derived recommendation. The Daily Action Brief is a day's worth.
+model Insight {
+  id          String        @id @default(cuid())
+  workspaceId String
+  date        DateTime      @db.Date
+  kind        InsightKind
+  status      InsightStatus @default(NEW)
+  /// "ad" | "adset" | "campaign" | "workspace"
+  entityType  String
+  entityId    String?
+  title       String
+  body        String
+  /// Projected monthly impact in cents. Computed in code, never by the model.
+  projectedImpactCents Int?
+  /// Model's confidence 0..1 in the recommendation.
+  confidence  Decimal?      @db.Decimal(4, 3)
+  /// Rank within the day's brief, 1 = most important.
+  rank        Int           @default(0)
+  payload     Json?
+  createdAt   DateTime      @default(now())
+  resolvedAt  DateTime?
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, date, kind, entityType, entityId])
+  @@index([workspaceId, date])
+  @@index([workspaceId, status])
+}
+
+model ChatThread {
+  id          String   @id @default(cuid())
+  workspaceId String
+  userId      String
+  title       String   @default("New conversation")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  workspace Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user      User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  messages  ChatMessage[]
+
+  @@index([workspaceId, updatedAt])
+}
+
+model ChatMessage {
+  id        String   @id @default(cuid())
+  threadId  String
+  role      ChatRole
+  content   String
+  /// Tool calls and their results, for transparency about where numbers came from.
+  toolCalls Json?
+  /// Token counts, so per-workspace AI cost stays visible against the plan price.
+  inputTokens  Int?
+  outputTokens Int?
+  createdAt DateTime @default(now())
+
+  thread ChatThread @relation(fields: [threadId], references: [id], onDelete: Cascade)
+
+  @@index([threadId, createdAt])
+}
+
+/// Daily tracking-health roll-up. Attribution silently breaking is the category's
+/// worst failure mode, so we measure it explicitly and alert on it.
+model HealthSnapshot {
+  id          String       @id @default(cuid())
+  workspaceId String
+  date        DateTime     @db.Date
+  status      HealthStatus @default(UNKNOWN)
+  pixelEvents24h  Int      @default(0)
+  conversions24h  Int      @default(0)
+  /// Count of touches seen per click-id type in the window.
+  clickIdCounts   Json?
+  /// Tracked conversions vs what the platforms reported, as a signed percentage.
+  discrepancyPct  Decimal? @db.Decimal(6, 2)
+  issues          Json?
+  createdAt       DateTime @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, date])
+  @@index([workspaceId, date])
+}
+
+/// A named filter set on the ads or conversions view.
+model SavedView {
+  id          String   @id @default(cuid())
+  workspaceId String
+  name        String
+  /// "ads" | "conversions" | "insights"
+  scope       String
+  filters     Json
+  createdBy   String?
+  createdAt   DateTime @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, scope, name])
+  @@index([workspaceId])
+}
+
+/// Public read-only report link. No login; the token is the credential.
+model ShareLink {
+  id          String    @id @default(cuid())
+  workspaceId String
+  token       String    @unique
+  label       String?
+  /// Date range and sections the link may show.
+  scope       Json
+  expiresAt   DateTime?
+  revokedAt   DateTime?
+  viewCount   Int       @default(0)
+  lastViewedAt DateTime?
+  createdAt   DateTime  @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId])
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  orgId     String
+  userId    String?
+  action    String
+  target    String?
+  metadata  Json?
+  createdAt DateTime @default(now())
+
+  org Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@index([orgId, createdAt])
+}

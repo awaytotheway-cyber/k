@@ -1,0 +1,259 @@
+@import "tailwindcss";
+
+/* ---------------------------------------------------------------------------
+   Theme switching
+
+   Three states, in precedence order:
+     html.dark   -> dark, chosen explicitly
+     html.light  -> light, chosen explicitly
+     no class    -> follow the operating system
+
+   The class is rendered by the server from a cookie, so there is no inline
+   script and no flash of the wrong theme — including on error and not-found
+   boundaries, where a beforeInteractive script does not reliably run.
+
+   The `dark:` variant therefore has to match both the explicit class and the
+   OS-preference case.
+--------------------------------------------------------------------------- */
+
+@custom-variant dark {
+  &:where(.dark, .dark *) {
+    @slot;
+  }
+  @media (prefers-color-scheme: dark) {
+    &:where(:root:not(.light), :root:not(.light) *) {
+      @slot;
+    }
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   Palette
+
+   Each colour is defined exactly once, as an --l-* (light) and --d-* (dark)
+   pair. The two mapping blocks below are the only places that choose between
+   them, so a new token is added in one place and mapped in two.
+
+   Components only ever use the semantic names. The verdict colours carry
+   product meaning — success = scale it, warning = watch it, danger = cut it —
+   and are always paired with a text label, never colour alone.
+--------------------------------------------------------------------------- */
+
+:root {
+  /* light */
+  --l-bg: oklch(99% 0.002 250);
+  --l-bg-subtle: oklch(97.2% 0.004 250);
+  --l-surface: oklch(100% 0 0);
+  --l-surface-raised: oklch(100% 0 0);
+  --l-border: oklch(91% 0.006 250);
+  --l-border-strong: oklch(84% 0.009 250);
+  --l-fg: oklch(21% 0.014 255);
+  --l-fg-muted: oklch(50% 0.014 255);
+  --l-fg-subtle: oklch(62% 0.012 255);
+  --l-primary: oklch(53% 0.192 268);
+  --l-primary-hover: oklch(47% 0.192 268);
+  --l-primary-fg: oklch(100% 0 0);
+  --l-primary-subtle: oklch(95% 0.03 268);
+  --l-success: oklch(56% 0.14 160);
+  --l-success-subtle: oklch(95% 0.04 160);
+  --l-warning: oklch(62% 0.13 68);
+  --l-warning-subtle: oklch(96% 0.05 85);
+  --l-danger: oklch(56% 0.19 22);
+  --l-danger-subtle: oklch(95% 0.03 22);
+  --l-chart-1: oklch(53% 0.192 268);
+  --l-chart-2: oklch(62% 0.15 195);
+  --l-chart-3: oklch(56% 0.14 160);
+  --l-chart-4: oklch(68% 0.14 75);
+  --l-chart-5: oklch(56% 0.19 22);
+  --l-chart-6: oklch(55% 0.17 310);
+
+  /* dark */
+  --d-bg: oklch(17% 0.012 258);
+  --d-bg-subtle: oklch(14% 0.012 258);
+  --d-surface: oklch(21% 0.014 258);
+  --d-surface-raised: oklch(25% 0.015 258);
+  --d-border: oklch(30% 0.016 258);
+  --d-border-strong: oklch(38% 0.018 258);
+  --d-fg: oklch(97% 0.004 250);
+  --d-fg-muted: oklch(72% 0.012 250);
+  --d-fg-subtle: oklch(60% 0.013 250);
+  --d-primary: oklch(68% 0.17 268);
+  --d-primary-hover: oklch(74% 0.16 268);
+  --d-primary-fg: oklch(17% 0.012 258);
+  --d-primary-subtle: oklch(28% 0.07 268);
+  --d-success: oklch(72% 0.15 160);
+  --d-success-subtle: oklch(27% 0.06 160);
+  --d-warning: oklch(79% 0.14 80);
+  --d-warning-subtle: oklch(29% 0.06 80);
+  --d-danger: oklch(67% 0.18 20);
+  --d-danger-subtle: oklch(29% 0.08 20);
+  --d-chart-1: oklch(68% 0.17 268);
+  --d-chart-2: oklch(72% 0.14 195);
+  --d-chart-3: oklch(72% 0.15 160);
+  --d-chart-4: oklch(79% 0.14 80);
+  --d-chart-5: oklch(67% 0.18 20);
+  --d-chart-6: oklch(70% 0.16 310);
+
+  /* default mapping: light */
+  --bg: var(--l-bg);
+  --bg-subtle: var(--l-bg-subtle);
+  --surface: var(--l-surface);
+  --surface-raised: var(--l-surface-raised);
+  --border: var(--l-border);
+  --border-strong: var(--l-border-strong);
+  --fg: var(--l-fg);
+  --fg-muted: var(--l-fg-muted);
+  --fg-subtle: var(--l-fg-subtle);
+  --primary: var(--l-primary);
+  --primary-hover: var(--l-primary-hover);
+  --primary-fg: var(--l-primary-fg);
+  --primary-subtle: var(--l-primary-subtle);
+  --success: var(--l-success);
+  --success-subtle: var(--l-success-subtle);
+  --warning: var(--l-warning);
+  --warning-subtle: var(--l-warning-subtle);
+  --danger: var(--l-danger);
+  --danger-subtle: var(--l-danger-subtle);
+  --chart-1: var(--l-chart-1);
+  --chart-2: var(--l-chart-2);
+  --chart-3: var(--l-chart-3);
+  --chart-4: var(--l-chart-4);
+  --chart-5: var(--l-chart-5);
+  --chart-6: var(--l-chart-6);
+
+  color-scheme: light;
+  --radius: 0.625rem;
+}
+
+/* No explicit choice recorded: follow the operating system. */
+@media (prefers-color-scheme: dark) {
+  :root:not(.light) {
+    --bg: var(--d-bg);
+    --bg-subtle: var(--d-bg-subtle);
+    --surface: var(--d-surface);
+    --surface-raised: var(--d-surface-raised);
+    --border: var(--d-border);
+    --border-strong: var(--d-border-strong);
+    --fg: var(--d-fg);
+    --fg-muted: var(--d-fg-muted);
+    --fg-subtle: var(--d-fg-subtle);
+    --primary: var(--d-primary);
+    --primary-hover: var(--d-primary-hover);
+    --primary-fg: var(--d-primary-fg);
+    --primary-subtle: var(--d-primary-subtle);
+    --success: var(--d-success);
+    --success-subtle: var(--d-success-subtle);
+    --warning: var(--d-warning);
+    --warning-subtle: var(--d-warning-subtle);
+    --danger: var(--d-danger);
+    --danger-subtle: var(--d-danger-subtle);
+    --chart-1: var(--d-chart-1);
+    --chart-2: var(--d-chart-2);
+    --chart-3: var(--d-chart-3);
+    --chart-4: var(--d-chart-4);
+    --chart-5: var(--d-chart-5);
+    --chart-6: var(--d-chart-6);
+
+    color-scheme: dark;
+  }
+}
+
+/* Dark chosen explicitly: wins over the OS in either direction. */
+:root.dark {
+  --bg: var(--d-bg);
+  --bg-subtle: var(--d-bg-subtle);
+  --surface: var(--d-surface);
+  --surface-raised: var(--d-surface-raised);
+  --border: var(--d-border);
+  --border-strong: var(--d-border-strong);
+  --fg: var(--d-fg);
+  --fg-muted: var(--d-fg-muted);
+  --fg-subtle: var(--d-fg-subtle);
+  --primary: var(--d-primary);
+  --primary-hover: var(--d-primary-hover);
+  --primary-fg: var(--d-primary-fg);
+  --primary-subtle: var(--d-primary-subtle);
+  --success: var(--d-success);
+  --success-subtle: var(--d-success-subtle);
+  --warning: var(--d-warning);
+  --warning-subtle: var(--d-warning-subtle);
+  --danger: var(--d-danger);
+  --danger-subtle: var(--d-danger-subtle);
+  --chart-1: var(--d-chart-1);
+  --chart-2: var(--d-chart-2);
+  --chart-3: var(--d-chart-3);
+  --chart-4: var(--d-chart-4);
+  --chart-5: var(--d-chart-5);
+  --chart-6: var(--d-chart-6);
+
+  color-scheme: dark;
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-bg-subtle: var(--bg-subtle);
+  --color-surface: var(--surface);
+  --color-surface-raised: var(--surface-raised);
+  --color-border-default: var(--border);
+  --color-border-strong: var(--border-strong);
+
+  --color-fg: var(--fg);
+  --color-fg-muted: var(--fg-muted);
+  --color-fg-subtle: var(--fg-subtle);
+
+  --color-primary: var(--primary);
+  --color-primary-hover: var(--primary-hover);
+  --color-primary-fg: var(--primary-fg);
+  --color-primary-subtle: var(--primary-subtle);
+
+  --color-success: var(--success);
+  --color-success-subtle: var(--success-subtle);
+  --color-warning: var(--warning);
+  --color-warning-subtle: var(--warning-subtle);
+  --color-danger: var(--danger);
+  --color-danger-subtle: var(--danger-subtle);
+
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-chart-6: var(--chart-6);
+
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, monospace;
+
+  --radius-default: var(--radius);
+}
+
+@layer base {
+  * {
+    border-color: var(--border);
+  }
+
+  body {
+    background-color: var(--bg);
+    color: var(--fg);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* Numbers in tables must line up vertically to be scannable. */
+  .tabular {
+    font-variant-numeric: tabular-nums;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--primary);
+    outline-offset: 2px;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+}
