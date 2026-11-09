@@ -78,14 +78,32 @@ export async function POST(request: Request) {
   const externalAdSetId = firstParam(url, ADSET_PARAMS);
   const externalCampaignId = firstParam(url, CAMPAIGN_PARAMS);
 
-  // Link straight to the ad when the URL carried its id and we already know
-  // that ad. Otherwise the ids are stored raw and resolved when spend arrives.
-  const ad = externalAdId
-    ? await db.ad.findFirst({
-        where: { workspaceId: workspace.id, externalId: externalAdId },
-        select: { id: true, adSetId: true, campaignId: true },
-      })
-    : null;
+  // Link to the ad now if we can.
+  //
+  // A click id names the platform, never the creative — resolving fbclid to an
+  // ad needs the Meta API. What does name it is an explicit id parameter or
+  // utm_content carrying the ad's name, which is how most accounts are set up.
+  //
+  // When nothing matches, the raw values are still stored: the ad usually does
+  // not exist yet, and resolveTouchAds links these retroactively once a spend
+  // import creates it.
+  const adCandidates = [externalAdId, provenance.utm.content].filter(
+    (value): value is string => typeof value === "string" && value.trim() !== "",
+  );
+
+  const ad =
+    adCandidates.length > 0
+      ? await db.ad.findFirst({
+          where: {
+            workspaceId: workspace.id,
+            OR: adCandidates.flatMap((value) => [
+              { externalId: value },
+              { name: { equals: value, mode: "insensitive" as const } },
+            ]),
+          },
+          select: { id: true, adSetId: true, campaignId: true },
+        })
+      : null;
 
   const visitor = await db.visitor.upsert({
     where: { workspaceId_anonId: { workspaceId: workspace.id, anonId } },

@@ -5,9 +5,10 @@ Marketing attribution and AI analytics for B2B SaaS advertisers.
 Tie every trial and every dollar of MRR back to the exact ad that produced it —
 then find out whether there is enough data to act on it yet.
 
-> **Status: Phase 0 complete.** The foundation runs: auth, tenancy, the full
-> database schema, the app shell, and a 90-day demo dataset. The attribution
-> engine, pixel, and ingest APIs land in Phase 1. See
+> **Status: Phase 1 complete.** The core loop runs end to end — pixel, conversion
+> ingest, the five-model attribution engine, the confidence layer, CSV spend
+> import, a Stripe webhook, and the dashboard, ads and conversions pages. The
+> AI layer, tracking health and client reports are Phase 2+. See
 > [`docs/specs/2026-11-09-trueroas-design.md`](docs/specs/2026-11-09-trueroas-design.md)
 > for the full plan and what each phase delivers.
 
@@ -156,7 +157,14 @@ npm run db:deploy    # apply migrations (production)
 npm run db:studio    # browse the data
 npm run db:reset     # drop and rebuild — destroys all local data
 npm run seed:demo    # (re)build the demo workspace
+
+npm run attribution:backfill             # recompute credit for every workspace
+npm run attribution:backfill -- my-slug   # or just one
 ```
+
+Run the backfill after seeding, after importing historical conversions, and
+after changing a workspace's lookback window. It is safe to repeat: existing
+credit rows are replaced, never added to.
 
 ---
 
@@ -199,6 +207,33 @@ there is no inline script and no flash of the wrong theme — including on error
 and not-found boundaries, where a `beforeInteractive` script does not reliably
 run. With no cookie, CSS follows the operating system.
 
+**Chart colours** are not a matter of taste. The categorical ramp in
+`globals.css` is the output of a validator that checks the OKLCH lightness
+band, a chroma floor, colour-blind separation between adjacent slots, a
+normal-vision floor and contrast against the chart surface, in both themes.
+Re-run it before changing any of those values.
+
+### How a click gets linked to a specific ad
+
+Worth understanding, because it shapes how you tag your URLs.
+
+A click id (`fbclid`, `gclid`) identifies the **platform**, not the creative.
+Resolving one to an ad requires that platform's API. Until that is connected,
+an ad is identified by the landing URL:
+
+- `utm_content` carrying the ad's name — the common setup, and what the demo
+  and the e2e test use;
+- or an explicit `tr_ad` / `ad_id` parameter.
+
+Without either, a click is still recorded and still credited to the right
+*platform*, but it cannot be credited to an ad, and that ad's CAC will read as
+if it produced nothing. Tag `utm_content` with the ad name and this resolves
+itself.
+
+Clicks usually arrive **before** the spend export that creates the ad row, so
+importing spend also runs a retroactive pass that links existing clicks to the
+ads they named. That is why the CSV path produces per-ad numbers at all.
+
 ---
 
 ## Notable version choices
@@ -222,17 +257,26 @@ dependency has an open advisory.
 ## Testing
 
 ```bash
-npm test
+npm test          # 240 unit tests
+npm run test:e2e  # the core-loop guard, against a real server and database
 ```
 
-Unit tests cover the pure logic. As Phase 1 lands, the attribution models
-(credit fractions summing to 1.0 across every path shape) and the confidence
-interval maths are the highest-value tests in the codebase and are written
-test-first.
+The unit tests concentrate where a mistake is expensive and invisible: the
+attribution models (credit fractions summing to 1.0 across every path shape,
+credited cents summing exactly to the conversion value), the credible-interval
+maths, click-id parsing, CSV coercion, and Stripe signature verification.
 
-The core-loop end-to-end guard — simulated click carrying `fbclid` → conversion
-via the API → attributed to the right ad on the dashboard — arrives with Phase 1
-alongside the code it protects.
+`e2e/core-loop.spec.ts` is the one test that must never go red. It signs up,
+sets a target CAC, creates an API key, imports spend, fires a tracked ad click,
+identifies the visitor, posts a conversion, and asserts the dashboard credits
+the right ad — and that a single conversion still reads **Too early** rather
+than a verdict. Everything else in the product is a layer on that path.
+
+The e2e suite needs a browser. Once per machine:
+
+```bash
+npx playwright install chromium
+```
 
 ---
 
