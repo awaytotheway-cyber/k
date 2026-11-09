@@ -35,7 +35,13 @@ const schema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
 });
 
-function load() {
+type Env = z.infer<typeof schema>;
+
+let cached: Env | null = null;
+
+function load(): Env {
+  if (cached) return cached;
+
   const parsed = schema.safeParse(process.env);
   if (!parsed.success) {
     const issues = parsed.error.issues
@@ -43,16 +49,44 @@ function load() {
       .join("\n");
     throw new Error(`Invalid environment configuration:\n${issues}\n`);
   }
-  return parsed.data;
+
+  cached = parsed.data;
+  return cached;
 }
 
-export const env = load();
+/**
+ * Validation is deferred to first access rather than run at import.
+ *
+ * Importing a module must not be able to throw: a module-load-time check takes
+ * down `next build` on any machine without a full .env, and makes every file
+ * that transitively imports this one untestable.
+ */
+export const env = new Proxy({} as Env, {
+  get: (_target, prop: string) => load()[prop as keyof Env],
+  has: (_target, prop: string) => prop in load(),
+  ownKeys: () => Reflect.ownKeys(load()),
+  getOwnPropertyDescriptor: () => ({ enumerable: true, configurable: true }),
+});
+
+type Features = {
+  ai: boolean;
+  billing: boolean;
+  email: boolean;
+  ipHashing: boolean;
+};
+
+function computeFeatures(): Features {
+  const e = load();
+  return {
+    ai: e.ANTHROPIC_API_KEY.length > 0,
+    billing: e.STRIPE_SECRET_KEY.length > 0,
+    email: e.RESEND_API_KEY.length > 0,
+    /** Skipped entirely when no salt is set, rather than using a weak one. */
+    ipHashing: e.IP_HASH_SALT.length >= 16,
+  };
+}
 
 /** What is actually configured. Drives honest empty states, not crashes. */
-export const features = {
-  ai: env.ANTHROPIC_API_KEY.length > 0,
-  billing: env.STRIPE_SECRET_KEY.length > 0,
-  email: env.RESEND_API_KEY.length > 0,
-  /** IP hashing is skipped entirely when no salt is set, rather than using a weak one. */
-  ipHashing: env.IP_HASH_SALT.length >= 16,
-} as const;
+export const features = new Proxy({} as Features, {
+  get: (_target, prop: string) => computeFeatures()[prop as keyof Features],
+});

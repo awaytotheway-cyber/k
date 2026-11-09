@@ -107,8 +107,8 @@ export default async function LandingPage() {
           </p>
           <div className="mt-5 overflow-x-auto">
             <pre className="w-fit rounded-md border border-[var(--border)] bg-bg-subtle p-3 font-mono text-xs leading-relaxed text-fg">
-              {`CAC $94   (95% CI $61–$210)     n=11   LIKELY GOOD   scale
-CAC $310  (95% CI $88–$2,400)   n=2    TOO EARLY     hold`}
+              {`CAC $94    95% CI $54–$177      n=11   LIKELY GOOD   scale it
+CAC $310   95% CI $97–$1,492    n=2    TOO EARLY     ~10 more conversions`}
             </pre>
           </div>
         </section>
